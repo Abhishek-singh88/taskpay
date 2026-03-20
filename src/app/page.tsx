@@ -255,7 +255,6 @@ export default function Home() {
       StellarWalletsKit.init({
         network: Networks.TESTNET,
         modules: defaultModules(),
-        appName: "TaskPay",
       });
       setWalletReady(true);
     } catch (err) {
@@ -274,7 +273,7 @@ export default function Home() {
       return;
     }
     try {
-      const { address } = await StellarWalletsKit.authModal({ modalTitle: "Select Wallet" });
+      const { address } = await StellarWalletsKit.authModal();
       if (!address) {
         throw new Error("wallet_not_found");
       }
