@@ -5,24 +5,19 @@ import * as StellarSdk from "@stellar/stellar-sdk";
 import { StellarWalletsKit } from "@creit.tech/stellar-wallets-kit/sdk";
 import { defaultModules } from "@creit.tech/stellar-wallets-kit/modules/utils";
 import { Networks } from "@creit.tech/stellar-wallets-kit/types";
+import { Task, TaskStatus, formatAddress } from "@/lib/taskpay-types";
+import { WalletCard } from "@/components/WalletCard";
+import { StatsGrid } from "@/components/StatsGrid";
+import { CreateTaskForm } from "@/components/CreateTaskForm";
+import { TaskBoard } from "@/components/TaskBoard";
+import { ContractStrip } from "@/components/ContractStrip";
+import { ToastStack } from "@/components/ToastStack";
 
 type Toast = {
   id: string;
   title: string;
   message: string;
   tone: "success" | "error" | "info";
-};
-
-type TaskStatus = "OPEN" | "IN_PROGRESS" | "SUBMITTED" | "COMPLETED" | "CANCELLED";
-
-type Task = {
-  id: number;
-  title: string;
-  description: string;
-  reward: string;
-  status: TaskStatus;
-  creator: string;
-  worker?: string;
 };
 
 const CONTRACT_ID =
@@ -42,30 +37,9 @@ const READONLY_ACCOUNT = process.env.NEXT_PUBLIC_READONLY_ACCOUNT ?? "";
 
 const STROOPS_PER_XLM = 10_000_000n;
 
-const STATUS_LABEL: Record<TaskStatus, string> = {
-  OPEN: "Open",
-  IN_PROGRESS: "In Progress",
-  SUBMITTED: "Submitted",
-  COMPLETED: "Completed",
-  CANCELLED: "Cancelled",
-};
-
-const STATUS_TONE: Record<TaskStatus, string> = {
-  OPEN: "bg-emerald-400/15 text-emerald-200 border-emerald-400/30",
-  IN_PROGRESS: "bg-cyan-400/15 text-cyan-200 border-cyan-400/30",
-  SUBMITTED: "bg-amber-400/15 text-amber-200 border-amber-400/30",
-  COMPLETED: "bg-lime-400/15 text-lime-200 border-lime-400/30",
-  CANCELLED: "bg-orange-400/15 text-orange-200 border-orange-400/30",
-};
-
-function formatAddress(addr?: string | null) {
-  if (!addr) return "Not connected";
-  return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
-}
-
 export default function Home() {
   const [tasks, setTasks] = useState<Task[]>([]);
-  const [filter, setFilter] = useState<TaskStatus | "ALL">("ALL");
+  const [filter, setFilter] = useState<TaskStatus>("OPEN");
   const [account, setAccount] = useState<string | null>(null);
   const [walletReady, setWalletReady] = useState(false);
   const [busyAction, setBusyAction] = useState<string | null>(null);
@@ -102,10 +76,7 @@ export default function Home() {
     return { total, open, inProgress, completed };
   }, [tasks]);
 
-  const visibleTasks = useMemo(() => {
-    if (filter === "ALL") return tasks;
-    return tasks.filter((t) => t.status === filter);
-  }, [tasks, filter]);
+  const visibleTasks = useMemo(() => tasks.filter((t) => t.status === filter), [tasks, filter]);
 
   function pushToast(tone: Toast["tone"], title: string, message: string) {
     const id = crypto.randomUUID();
@@ -143,6 +114,7 @@ export default function Home() {
       CANCELLED: "CANCELLED",
     };
     const status = statusMap[rawStatus] ?? "OPEN";
+
     return {
       id: Number(data.id ?? 0),
       creator: data.creator ?? "",
@@ -157,14 +129,13 @@ export default function Home() {
   async function buildContractTx(source: string, contractId: string, method: string, args: any[]) {
     const accountObj = await horizonServer.loadAccount(source);
     const contract = new (StellarSdk as any).Contract(contractId);
-    const tx = new (StellarSdk as any).TransactionBuilder(accountObj, {
+    return new (StellarSdk as any).TransactionBuilder(accountObj, {
       fee: (StellarSdk as any).BASE_FEE,
       networkPassphrase: NETWORK_PASSPHRASE,
     })
       .addOperation(contract.call(method, ...args))
       .setTimeout(30)
       .build();
-    return tx;
   }
 
   async function simulateAndSend(
@@ -196,9 +167,8 @@ export default function Home() {
       const detail = sendResult?.errorResultXdr ? ` Error XDR: ${sendResult.errorResultXdr}` : "";
       throw new Error(`Transaction rejected: ${sendResult.status}.${detail}`);
     }
-    if (!opts?.waitForSuccess) {
-      return hash;
-    }
+    if (!opts?.waitForSuccess) return hash;
+
     const maxAttempts = opts?.maxAttempts ?? 20;
     for (let attempts = 0; attempts < maxAttempts; attempts += 1) {
       try {
@@ -304,9 +274,7 @@ export default function Home() {
       return;
     }
     try {
-      const { address } = await StellarWalletsKit.authModal({
-        modalTitle: "Select Wallet",
-      });
+      const { address } = await StellarWalletsKit.authModal({ modalTitle: "Select Wallet" });
       if (!address) {
         throw new Error("wallet_not_found");
       }
@@ -319,6 +287,17 @@ export default function Home() {
       }
       const msg = err instanceof Error ? err.message : String(err);
       pushToast("error", "Connection Failed", msg || "Wallet connection was rejected or cancelled.");
+    }
+  }
+
+  async function handleDisconnect() {
+    try {
+      await StellarWalletsKit.disconnect();
+    } catch {
+      // ignore
+    } finally {
+      setAccount(null);
+      pushToast("info", "Wallet Disconnected", "You can connect again anytime.");
     }
   }
 
@@ -452,7 +431,7 @@ export default function Home() {
   return (
     <div className="min-h-screen px-6 pb-16 pt-10">
       <div className="mx-auto flex max-w-6xl flex-col gap-8">
-        <header className="flex flex-col gap-6 rounded-3xl border border-white/10 bg-[var(--panel)]/80 p-8 shadow-[0_20px_60px_rgba(2,8,23,0.55)]">
+        <header className="flex flex-col gap-6 rounded-3xl border border-emerald-400/20 bg-[linear-gradient(135deg,rgba(16,185,129,0.12),rgba(15,23,42,0.85))] p-8 shadow-[0_25px_70px_rgba(2,8,23,0.6)]">
           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div className="space-y-3">
               <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs uppercase tracking-[0.3em] text-white/70">
@@ -464,248 +443,48 @@ export default function Home() {
                 your Soroban contract on testnet.
               </p>
             </div>
-            <div className="flex flex-col gap-3 rounded-2xl border border-white/10 bg-white/5 p-4">
-              <div className="text-xs uppercase tracking-[0.2em] text-white/60">Wallet</div>
-              <div className="text-lg font-semibold">{formatAddress(account)}</div>
-              <div className="flex flex-wrap gap-2">
-                <button
-                  onClick={handleConnect}
-                  className="rounded-full bg-white px-4 py-2 text-sm font-semibold text-slate-900 transition hover:opacity-90"
-                >
-                  Connect Wallet
-                </button>
-              </div>
-              <div className="text-xs text-white/50">
-                Contract: <span className="font-mono">{formatAddress(CONTRACT_ID)}</span>
-              </div>
-              <div className="text-xs text-white/50">
-                Network: <span className="font-mono">{NETWORK}</span>
-              </div>
-            </div>
+            <WalletCard
+              account={account}
+              contractId={CONTRACT_ID}
+              network={NETWORK}
+              onConnect={handleConnect}
+              onDisconnect={handleDisconnect}
+            />
           </div>
 
-          <div className="grid gap-4 md:grid-cols-4">
-            <div className="rounded-2xl border border-white/10 bg-[var(--panel-strong)] p-4">
-              <div className="text-xs uppercase tracking-[0.2em] text-white/50">Total Tasks</div>
-              <div className="mt-2 text-2xl font-semibold">{stats.total}</div>
-            </div>
-            <div className="rounded-2xl border border-white/10 bg-[var(--panel-strong)] p-4">
-              <div className="text-xs uppercase tracking-[0.2em] text-white/50">Open</div>
-              <div className="mt-2 text-2xl font-semibold">{stats.open}</div>
-            </div>
-            <div className="rounded-2xl border border-white/10 bg-[var(--panel-strong)] p-4">
-              <div className="text-xs uppercase tracking-[0.2em] text-white/50">In Progress</div>
-              <div className="mt-2 text-2xl font-semibold">{stats.inProgress}</div>
-            </div>
-            <div className="rounded-2xl border border-white/10 bg-[var(--panel-strong)] p-4">
-              <div className="text-xs uppercase tracking-[0.2em] text-white/50">Completed</div>
-              <div className="mt-2 text-2xl font-semibold">{stats.completed}</div>
-            </div>
-          </div>
+          <StatsGrid stats={stats} />
         </header>
 
         <div className="grid gap-6 lg:grid-cols-[1.1fr_1.9fr]">
-          <section className="rounded-3xl border border-white/10 bg-[var(--panel)]/80 p-6">
-            <div className="flex items-center justify-between">
-              <h2 className="text-xl font-semibold">Create Task</h2>
-              <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/60">
-                On-Chain
-              </span>
-            </div>
-            <div className="mt-6 flex flex-col gap-4">
-              <label className="text-xs uppercase tracking-[0.2em] text-white/50">Title</label>
-              <input
-                value={form.title}
-                onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
-                placeholder="Design a landing page"
-                className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white/90 focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
-              />
-              <label className="text-xs uppercase tracking-[0.2em] text-white/50">Description</label>
-              <textarea
-                value={form.description}
-                onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
-                placeholder="Scope, deliverables, and any constraints"
-                rows={5}
-                className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white/90 focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
-              />
-              <div className="flex items-center gap-3">
-                <div className="flex flex-col">
-                  <label className="text-xs uppercase tracking-[0.2em] text-white/50">Reward</label>
-                  <div className="mt-2 flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2">
-                    <input
-                      value={form.reward}
-                      onChange={(e) => setForm((f) => ({ ...f, reward: e.target.value }))}
-                      className="w-20 bg-transparent text-sm text-white/90 focus:outline-none"
-                    />
-                    <span className="text-xs text-white/50">XLM</span>
-                  </div>
-                </div>
-                <div className="ml-auto flex flex-col items-end">
-                  <span className="text-xs text-white/50">Token</span>
-                  <span className="font-mono text-xs text-white/70">{formatAddress(NATIVE_TOKEN_ID)}</span>
-                </div>
-              </div>
-              <button
-                onClick={createTask}
-                disabled={busyAction === "create"}
-                className="mt-2 rounded-2xl bg-gradient-to-r from-emerald-400 to-cyan-300 px-4 py-3 text-sm font-semibold text-slate-900 transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-70"
-              >
-                {busyAction === "create" && createStep === "approve"
-                  ? "Approving Allowance..."
-                  : busyAction === "create"
-                  ? "Creating Task..."
-                  : "Lock Funds & Create"}
-              </button>
-            </div>
-          </section>
-
-          <section className="rounded-3xl border border-white/10 bg-[var(--panel)]/80 p-6">
-            <div className="flex flex-wrap items-center justify-between gap-4">
-              <h2 className="text-xl font-semibold">Task Board</h2>
-              <div className="flex flex-wrap gap-2">
-                {["ALL", "OPEN", "IN_PROGRESS", "SUBMITTED", "COMPLETED"].map((s) => (
-                  <button
-                    key={s}
-                    onClick={() => setFilter(s as TaskStatus | "ALL")}
-                    className={`rounded-full px-3 py-1 text-xs font-semibold transition ${
-                      filter === s
-                        ? "bg-white text-slate-900"
-                        : "border border-white/10 bg-white/5 text-white/70"
-                    }`}
-                  >
-                    {s === "ALL" ? "All" : STATUS_LABEL[s as TaskStatus]}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="mt-6 grid gap-4">
-              {loadingTasks && (
-                <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-white/70">
-                  Loading tasks from chain...
-                </div>
-              )}
-              {chainError && (
-                <div className="rounded-2xl border border-red-400/40 bg-red-400/10 p-4 text-sm text-red-100">
-                  {chainError}
-                </div>
-              )}
-              {visibleTasks.length === 0 && (
-                <div className="rounded-2xl border border-dashed border-white/20 p-8 text-center text-sm text-white/60">
-                  No tasks yet. Create one to kick things off.
-                </div>
-              )}
-
-              {visibleTasks.map((task) => {
-                const isCreator = account && task.creator === account;
-                const isWorker = account && task.worker === account;
-                return (
-                  <div
-                    key={task.id}
-                    className="rounded-2xl border border-white/10 bg-[var(--panel-strong)] p-5"
-                  >
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div>
-                        <h3 className="text-lg font-semibold">{task.title}</h3>
-                        <p className="mt-2 text-sm text-white/70">{task.description}</p>
-                      </div>
-                      <div className="flex flex-col items-end gap-2">
-                        <span className={`rounded-full border px-3 py-1 text-xs ${STATUS_TONE[task.status]}`}>
-                          {STATUS_LABEL[task.status]}
-                        </span>
-                        <div className="rounded-full bg-white/5 px-3 py-1 text-xs text-white/70">
-                          Reward: <span className="font-semibold text-white">{task.reward} XLM</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="mt-4 flex flex-wrap items-center gap-4 text-xs text-white/50">
-                      <div>
-                        Creator: <span className="font-mono text-white/70">{formatAddress(task.creator)}</span>
-                      </div>
-                      <div>
-                        Worker: <span className="font-mono text-white/70">{formatAddress(task.worker)}</span>
-                      </div>
-                    </div>
-
-                    <div className="mt-5 flex flex-wrap gap-2">
-                      {task.status === "OPEN" && !isCreator && (
-                        <button
-                          onClick={() => acceptTask(task.id)}
-                          disabled={busyAction === `accept-${task.id}`}
-                          className="rounded-full border border-emerald-400/40 bg-emerald-400/10 px-4 py-2 text-xs font-semibold text-emerald-200"
-                        >
-                          {busyAction === `accept-${task.id}` ? "Accepting..." : "Accept"}
-                        </button>
-                      )}
-                      {task.status === "IN_PROGRESS" && isWorker && (
-                        <button
-                          onClick={() => submitTask(task.id)}
-                          disabled={busyAction === `submit-${task.id}`}
-                          className="rounded-full border border-cyan-400/40 bg-cyan-400/10 px-4 py-2 text-xs font-semibold text-cyan-200"
-                        >
-                          {busyAction === `submit-${task.id}` ? "Submitting..." : "Submit Work"}
-                        </button>
-                      )}
-                      {task.status === "SUBMITTED" && isCreator && (
-                        <button
-                          onClick={() => approveTask(task.id)}
-                          disabled={busyAction === `approve-${task.id}`}
-                          className="rounded-full border border-lime-400/40 bg-lime-400/10 px-4 py-2 text-xs font-semibold text-lime-200"
-                        >
-                          {busyAction === `approve-${task.id}` ? "Paying..." : "Approve & Pay"}
-                        </button>
-                      )}
-                      {(task.status === "OPEN" || task.status === "IN_PROGRESS") && isCreator && (
-                        <button
-                          onClick={() => cancelTask(task.id)}
-                          disabled={busyAction === `cancel-${task.id}`}
-                          className="rounded-full border border-orange-400/40 bg-orange-400/10 px-4 py-2 text-xs font-semibold text-orange-200"
-                        >
-                          {busyAction === `cancel-${task.id}` ? "Cancelling..." : "Cancel"}
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </section>
+          <CreateTaskForm
+            title={form.title}
+            description={form.description}
+            reward={form.reward}
+            tokenId={NATIVE_TOKEN_ID}
+            isBusy={busyAction === "create"}
+            createStep={createStep}
+            onChange={setForm}
+            onSubmit={createTask}
+          />
+          <TaskBoard
+            tasks={visibleTasks}
+            filter={filter}
+            loading={loadingTasks}
+            error={chainError}
+            account={account}
+            busyAction={busyAction}
+            onFilterChange={setFilter}
+            onAccept={acceptTask}
+            onSubmit={submitTask}
+            onApprove={approveTask}
+            onCancel={cancelTask}
+          />
         </div>
 
-        <section className="rounded-3xl border border-white/10 bg-[var(--panel)]/80 p-6 text-sm text-white/70">
-          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <div>
-              <div className="text-xs uppercase tracking-[0.2em] text-white/50">On-Chain Wiring</div>
-              <p className="mt-2 max-w-2xl">
-                This UI is wired to your deployed contract. Wallet signing and Soroban transactions
-                are live on testnet.
-              </p>
-            </div>
-            <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 font-mono text-xs">
-              {CONTRACT_ID}
-            </div>
-          </div>
-        </section>
+        <ContractStrip contractId={CONTRACT_ID} />
       </div>
 
-      <div className="fixed bottom-6 right-6 flex w-72 flex-col gap-3">
-        {toasts.map((toast) => (
-          <div
-            key={toast.id}
-            className={`rounded-2xl border px-4 py-3 text-xs shadow-lg backdrop-blur ${
-              toast.tone === "success"
-                ? "border-emerald-400/40 bg-emerald-400/10 text-emerald-100"
-                : toast.tone === "error"
-                ? "border-red-400/40 bg-red-400/10 text-red-100"
-                : "border-cyan-400/40 bg-cyan-400/10 text-cyan-100"
-            }`}
-          >
-            <div className="text-sm font-semibold">{toast.title}</div>
-            <div className="mt-1 text-xs text-white/70">{toast.message}</div>
-          </div>
-        ))}
-      </div>
+      <ToastStack toasts={toasts} />
     </div>
   );
 }
