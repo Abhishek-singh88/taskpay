@@ -1,3 +1,5 @@
+#![cfg(feature = "testutils")]
+
 use soroban_sdk::{symbol_short, Address, Env, String};
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::token::{Client as TokenClient, StellarAssetClient};
